@@ -26,6 +26,6 @@ express()
         Object.keys(instances).forEach(i => instances[i].setToken(t));
         res.sendStatus(200);
     })
-    .listen(80, () => {
-        console.log("✅ Open http://localhost to start")
+    .listen(4000, () => {
+        console.log("✅ Open http://localhost:4000 to start")
     });
