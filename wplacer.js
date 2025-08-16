@@ -30,8 +30,11 @@ export const log = async (id, data, error) => {
 };
 export class WPlacer {
     constructor(template, coords, canBuyCharges) {
-        const [_tx, _ty, px, py] = coords;
-        if (px + (template.width - 1) >= 1000 || py + (template.height - 1) >= 1000) throw Error("No space to draw the entire template in one tile.");
+        if (template && coords) {
+            const [_tx, _ty, px, py] = coords;
+            if (px + (template.width - 1) >= 1000 || py + (template.height - 1) >= 1000) throw Error("No space to draw the entire template in one tile.");
+        };
+        this.status = "Waiting until called to start.";
         this.template = template;
         this.coords = coords;
         this.canBuyCharges = canBuyCharges;
@@ -41,6 +44,7 @@ export class WPlacer {
         this.userInfo = null;
         this.tile = null;
         this.token = null;
+        this.running = false;
         this._resolveToken = null;
         this.tokenPromise = new Promise((resolve) => {
             this._resolveToken = resolve;
@@ -59,8 +63,11 @@ export class WPlacer {
         if (!this.me) this.me = await this.browser.newPage();
         await this.me.goto('https://backend.wplace.live/me');
         await this.me.waitForSelector('body');
-        this.userInfo = JSON.parse(await this.me.evaluate(() => document.querySelector('body').innerText));
-        return true;
+        const userInfo = JSON.parse(await this.me.evaluate(() => document.querySelector('body').innerText));
+        if (userInfo.id && userInfo.name) {
+            this.userInfo = userInfo;
+            return true;
+        } else throw Error(`Unexpected response: ${JSON.stringify(userInfo)}`);;
     };
     cookieStr = (obj) => Object.keys(obj).map(cookie => `${cookie}=${obj[cookie]}`).join(";");
     async post(url, body) {
@@ -75,8 +82,8 @@ export class WPlacer {
                 },
                 body: JSON.stringify(body)
             });
-            const response = await request.json();
-            resolve(response);
+            const data = await request.json();
+            resolve({ status: request.status, data: data });
         }), url, this.cookieStr(this.cookies), body);
         return response;
     };
@@ -120,10 +127,11 @@ export class WPlacer {
         const [tx, ty, px, py] = this.coords;
         let pixelsUsed = 0;
         if (!this.token) {
-            log(this.userInfo.id, "⚠️ No CAPTCHA token, please paint any pixel to retrieve one and continue");
+            log(this.userInfo.id, "⚠️ No Cloudflare token, please paint any pixel to retrieve one and continue");
             await this.tokenPromise;
-            log(this.userInfo.id, "✅ Got CAPTCHA token!");
+            log(this.userInfo.id, "✅ Got Cloudflare token!");
         };
+        await this.loadUserInfo();
         const body = { colors: [], coords: [], t: this.token };
         log(this.userInfo.id, "🎨 Painting...");
         for (let y = 0; y < this.template.height; y++) {
@@ -134,24 +142,42 @@ export class WPlacer {
                 pixelsUsed++;
                 if (pixelsUsed === Math.floor(this.userInfo.charges.count)) {
                     const response = await this.post(`https://backend.wplace.live/s0/pixel/${tx}/${ty}`, body);
-                    if (response.painted && response.painted == pixelsUsed) {
+                    if (response.data.painted && response.data.painted == pixelsUsed) {
                         log(this.userInfo.id, `🎨 Painted ${pixelsUsed} pixels`);
                         return pixelsUsed;
+                    } else if (response.status === 403 && response.data.error === "refresh") {
+                        log(this.userInfo.id, "⚠️ Cloudflare token expired, waiting for new token...");
+                        this.token = null;
+                        this.tokenPromise = new Promise((resolve) => {
+                            this._resolveToken = resolve;
+                        });
+                        await this.tokenPromise;
+                        log(this.userInfo.id, "✅ Got new Cloudflare token!");
+                        return await this.paint();
                     } else throw Error(`Unexpected response: ${JSON.stringify(response)}`);
                 };
             };
         };
         if (pixelsUsed > 0) {
             const response = await this.post(`https://backend.wplace.live/s0/pixel/${tx}/${ty}`, body);
-            if (response.painted && response.painted == pixelsUsed) {
+            if (response.data.painted && response.data.painted == pixelsUsed) {
                 log(this.userInfo.id, `🎨 Painted ${pixelsUsed} pixels`);
                 return pixelsUsed;
+            } else if (response.status === 403 && response.data.error === "refresh") {
+                log(this.userInfo.id, "⚠️ Cloudflare token expired, waiting for new token...");
+                this.token = null;
+                this.tokenPromise = new Promise((resolve) => {
+                    this._resolveToken = resolve;
+                });
+                await this.tokenPromise;
+                log(this.userInfo.id, "✅ Got new Cloudflare token!");
+                return await this.paint();
             } else throw Error(`Unexpected response: ${JSON.stringify(response)}`);
         };
     };
     async buyCharges(amount) {
-        const response = await this.post(`https://backend.wplace.live/s0/pixel/${tx}/${ty}`, { product: { id: 80, amount: amount } });
-        if (response.success) {
+        const response = await this.post(`https://backend.wplace.live/purchase`, { product: { id: 80, amount: amount } });
+        if (response.data.success) {
             log(this.userInfo.id, `🛒 Bought ${amount * 30} pixels for ${amount * 500} droplets`);
             return true;
         } else throw Error(`Unexpected response: ${JSON.stringify(response)}`);
@@ -172,20 +198,23 @@ export class WPlacer {
     };
     async start() {
         this.running = true;
-        log(this.userInfo.id, "▶️ Starting...")
+        this.status = "Started."
+        log(this.userInfo.id, "▶️ Starting...");
         while (true) {
             if (this.running) {
                 const pixelsUsed = await this.paint();
                 if (pixelsUsed === this.template.ink) {
                     this.running = false;
-                    log(this.userInfo.id, "🖼 Finished!");
+                    log(this.userInfo.id, "✅ Finished!");
+                    this.status = "Finished.";
                     break;
                 } else {
-                    await this.sleep(2500);
+                    await this.sleep(5000);
                     const pixelsLeft = await this.pixelsLeft();
                     if (pixelsLeft === 0) {
                         this.running = false;
-                        log(this.userInfo.id, "🖼 Finished!");
+                        log(this.userInfo.id, "✅ Finished!");
+                        this.status = "Finished.";
                         break;
                     } else {
                         log(this.userInfo.id, `🛑 ${pixelsLeft} pixels left`);
@@ -198,13 +227,15 @@ export class WPlacer {
                         } else {
                             const restartAt = Math.min(this.userInfo.charges.max, pixelsLeft);
                             const time = (restartAt - Math.floor(this.userInfo.charges.count)) * this.userInfo.charges.cooldownMs;
-                            log(this.userInfo.id, `⏳ Waiting for recharge in ${duration(time)}...`);
+                            log(this.userInfo.id, `⏳ Waiting for ${restartAt} pixel recharge in ${duration(time)}...`);
+                            this.status = `Waiting for recharges.`;
                             await this.sleep(time);
                         };
                     };
                 };
             } else {
                 log(this.userInfo.id, "✖️ Stopped.")
+                this.status = "Stopped."
                 break;
             };
         };
