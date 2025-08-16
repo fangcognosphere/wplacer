@@ -1,11 +1,11 @@
-<h1 align="center"><p style="display: inline-flex; align-items: center; gap: 0.25em"><img style="width: 1.5em; height: 1.5em;" src="public/icons/favicon.png">wplacer</p></h1>
+<h1 align="center"><p style="display: inline-flex; align-items: center; gap: 0.25em"><img style="width: 30px; height: 30px;" src="public/icons/favicon.png"> wplacer</p></h1>
 
 <p align="center"><img src="https://img.shields.io/github/package-json/v/fangcognosphere/wplacer">
 <a href="LICENSE"><img src="https://img.shields.io/github/license/fangcognosphere/wplacer"></a>
 <a href="README.md"><img src="https://img.shields.io/badge/tradução-português_(brasil)-green"></a><//p>
+<p align="center">An auto-drawing bot for [wplace.live](https://wplace.live/)</p>
 
 ## This project is for educational purposes only.
-<p align="center">An auto-drawing bot for [wplace.live](https://wplace.live/)</p>
 
 ## Features ✅
 
